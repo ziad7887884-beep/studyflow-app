@@ -5,60 +5,295 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StudyFlow AI Lab — Qwen3-14B</title>
   <style>
-    :root { color-scheme: dark; }
+    :root {
+      color-scheme: dark;
+      --bg: #080b09;
+      --surface: rgba(16, 21, 18, 0.82);
+      --surface-2: rgba(20, 28, 23, 0.92);
+      --border: rgba(98, 139, 111, 0.22);
+      --text: #f3f7f4;
+      --muted: #9aa99f;
+      --muted-2: #6f7e74;
+      --accent: #56d364;
+      --accent-2: #9be56b;
+      --danger: #ff7b72;
+      --shadow: 0 22px 60px rgba(0, 0, 0, 0.38);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      min-height: 100%;
+      background: var(--bg);
+    }
+
     body {
       margin: 0;
-      font-family: Inter, system-ui, sans-serif;
-      background: #0b0b0d;
-      color: #f2f2f2;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(86, 211, 100, 0.12), transparent 28%),
+        radial-gradient(circle at 88% 16%, rgba(155, 229, 107, 0.08), transparent 24%),
+        linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px),
+        var(--bg);
+      background-size: auto, auto, 34px 34px, 34px 34px, auto;
+      color: var(--text);
     }
-    .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px; }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(120deg, transparent 0 45%, rgba(86,211,100,0.035) 52%, transparent 60%);
+      mix-blend-mode: screen;
+    }
+
+    .wrap {
+      width: min(980px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 42px 0 64px;
+      position: relative;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 28px;
+      margin-bottom: 18px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: linear-gradient(145deg, rgba(20, 28, 23, 0.94), rgba(12, 16, 13, 0.84));
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 260px;
+      height: 260px;
+      right: -100px;
+      top: -130px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(86,211,100,0.17), transparent 68%);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(86, 211, 100, 0.25);
+      background: rgba(86, 211, 100, 0.08);
+      color: var(--accent-2);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 14px rgba(86,211,100,0.85);
+    }
+
+    h1 {
+      margin: 15px 0 8px;
+      font-size: clamp(30px, 5vw, 44px);
+      line-height: 1;
+      letter-spacing: -0.045em;
+    }
+
+    h1 span {
+      color: var(--accent);
+      text-shadow: 0 0 26px rgba(86,211,100,0.16);
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.65;
+      max-width: 760px;
+      margin: 0;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin-top: 18px;
+    }
+
+    .badge {
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.07);
+      color: #bcc7c0;
+      font-size: 12px;
+    }
+
     .card {
-      background: #141418;
-      border: 1px solid #29292f;
-      border-radius: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
       padding: 20px;
+      margin-bottom: 14px;
+      backdrop-filter: blur(14px);
+      box-shadow: 0 14px 34px rgba(0,0,0,0.18);
+    }
+
+    .card h2 {
+      margin: 0 0 5px;
+      font-size: 15px;
+      letter-spacing: -0.01em;
+    }
+
+    .section-sub {
+      color: var(--muted-2);
+      font-size: 12px;
       margin-bottom: 16px;
     }
-    h1 { margin: 0 0 8px; font-size: 28px; }
-    p { color: #a8a8b3; line-height: 1.55; }
-    .status { margin: 12px 0; font-size: 14px; color: #a8a8b3; min-height: 22px; }
+
+    .status {
+      margin: 12px 0 0;
+      font-size: 13px;
+      color: var(--muted);
+      min-height: 20px;
+    }
+
+    .progress {
+      width: 100%;
+      height: 7px;
+      margin-top: 12px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .progress > div {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #3fb950, #9be56b);
+      box-shadow: 0 0 18px rgba(86,211,100,0.45);
+      transition: width 180ms ease;
+    }
+
     button {
-      border: 0; border-radius: 9px; padding: 11px 15px;
-      background: #3fb950; color: #081008; font-weight: 700; cursor: pointer;
+      border: 1px solid rgba(86,211,100,0.3);
+      border-radius: 10px;
+      padding: 11px 15px;
+      background: linear-gradient(180deg, #56d364, #3fb950);
+      color: #081008;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 8px 22px rgba(86,211,100,0.16);
+      transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
     }
-    button:disabled { opacity: .55; cursor: not-allowed; }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      filter: brightness(1.04);
+      box-shadow: 0 12px 28px rgba(86,211,100,0.22);
+    }
+
+    button:disabled {
+      opacity: .48;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
     textarea {
-      width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical;
-      background: #0e0e12; border: 1px solid #303039; color: #fff;
-      border-radius: 9px; padding: 12px; font: inherit;
+      width: 100%;
+      min-height: 130px;
+      resize: vertical;
+      background: rgba(7, 10, 8, 0.88);
+      border: 1px solid rgba(255,255,255,0.09);
+      color: #fff;
+      border-radius: 12px;
+      padding: 14px;
+      font: inherit;
+      outline: none;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
     }
-    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
+    textarea:focus {
+      border-color: rgba(86,211,100,0.55);
+      box-shadow: 0 0 0 3px rgba(86,211,100,0.08);
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
     pre {
-      white-space: pre-wrap; margin: 14px 0 0; padding: 14px;
-      background:#0e0e12; border:1px solid #27272e; border-radius:9px;
-      min-height: 80px;
+      white-space: pre-wrap;
+      margin: 14px 0 0;
+      padding: 16px;
+      background: rgba(7, 10, 8, 0.76);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 12px;
+      min-height: 100px;
+      color: #e7efe9;
+      line-height: 1.65;
     }
-    .small { font-size: 12px; color: #7f7f8b; }
-    .ok { color: #6ee7a0; }
-    .err { color: #ff7b72; }
-    code { color:#d2a8ff; }
+
+    .small {
+      font-size: 12px;
+      color: var(--muted-2);
+      line-height: 1.6;
+    }
+
+    .ok { color: #7ee787; }
+    .err { color: var(--danger); }
+    code { color: #b9f6c0; }
+
+    a {
+      color: var(--accent-2);
+      text-decoration: none;
+    }
+
+    a:hover { text-decoration: underline; }
+
+    .footer {
+      text-align: center;
+      padding-top: 8px;
+    }
+
+    @media (max-width: 640px) {
+      .wrap { width: min(100% - 20px, 980px); padding-top: 20px; }
+      .hero, .card { padding: 16px; border-radius: 14px; }
+      h1 { font-size: 31px; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="card">
-      <h1>StudyFlow AI Lab</h1>
+    <div class="hero">
+      <div class="eyebrow"><span class="dot"></span> StudyFlow AI Lab</div>
+      <h1>Qwen3-<span>14B</span> Browser Test</h1>
       <p>Experimental browser-only test for <strong>Qwen3-14B</strong> using WebLLM + WebGPU. The model runs on the visitor's device; there is no AI API key in this page.</p>
-      <div class="small">Model weights: Apache 2.0. Temporary external WebGPU library: GPL-3.0 (linked below).</div>
+      <div class="meta"><span class="badge">WebGPU</span><span class="badge">WebLLM</span><span class="badge">Browser-only inference</span><span class="badge">No AI API key</span></div><div class="small" style="margin-top:14px;">Model weights: Apache 2.0. Temporary external WebGPU library: GPL-3.0 (linked below).</div>
     </div>
 
     <div class="card">
+      <h2>Model runtime</h2>
+      <div class="section-sub">Load the model into your browser GPU.</div>
       <div class="row">
         <button id="loadBtn">Load Qwen3-14B</button>
         <span id="gpuStatus" class="status"></span>
       </div>
-      <div id="status" class="status">Not loaded.</div>
+      <div id="status" class="status">Not loaded.</div><div class="progress"><div id="progressBar"></div></div>
       <div class="small">The first load may download ~8.3 GB of model files and can take a long time. The browser caches the model after a successful download.</div>
     </div>
 
@@ -93,6 +328,7 @@
     const status = document.getElementById("status");
     const reply = document.getElementById("reply");
     const gpuStatus = document.getElementById("gpuStatus");
+    const progressBar = document.getElementById("progressBar");
 
     let engine = null;
 
@@ -125,6 +361,9 @@
           appConfig,
           initProgressCallback: (p) => {
             status.textContent = p.text || "Loading model…";
+            if (progressBar && typeof p.progress === "number") {
+              progressBar.style.width = Math.max(0, Math.min(100, p.progress * 100)) + "%";
+            }
           },
           logLevel: "INFO",
         });

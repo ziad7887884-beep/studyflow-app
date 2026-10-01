@@ -16,7 +16,7 @@ function supabaseRestUrl(path = '') {
 export async function loadState(): Promise<{ state: StudyFlowState; remote: boolean }> {
   try {
     const response = await fetch(
-      supabaseRestUrl('/studyflow_state?select=data&eq.id=default&limit=1'),
+      supabaseRestUrl('/studyflow_state?select=data&id=eq.default&limit=1'),
       { headers }
     );
 

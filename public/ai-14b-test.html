@@ -270,6 +270,126 @@
       padding-top: 8px;
     }
 
+
+    .theme-switch {
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.045);
+      border: 1px solid rgba(255,255,255,0.08);
+      z-index: 2;
+    }
+
+    .theme-switch button {
+      appearance: none;
+      border: 0;
+      border-radius: 8px;
+      padding: 7px 9px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      box-shadow: none;
+    }
+
+    .theme-switch button.active {
+      background: rgba(86,211,100,0.14);
+      color: var(--accent-2);
+      box-shadow: none;
+      transform: none;
+      filter: none;
+    }
+
+    body[data-theme="calm"] {
+      color-scheme: light;
+      --bg: #eef4ed;
+      --surface: rgba(255, 255, 255, 0.82);
+      --surface-2: rgba(255, 255, 255, 0.94);
+      --border: rgba(59, 93, 64, 0.16);
+      --text: #162018;
+      --muted: #647268;
+      --muted-2: #89958b;
+      --accent: #2f9e44;
+      --accent-2: #31823e;
+      --danger: #d84b4b;
+      --shadow: 0 22px 60px rgba(50, 79, 56, 0.14);
+    }
+
+    body[data-theme="calm"] {
+      background:
+        radial-gradient(circle at 10% 12%, rgba(73, 142, 82, 0.12), transparent 28%),
+        radial-gradient(circle at 88% 18%, rgba(230, 199, 132, 0.18), transparent 26%),
+        linear-gradient(rgba(52, 80, 55, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(52, 80, 55, 0.03) 1px, transparent 1px),
+        linear-gradient(135deg, #f8fbf7, #e9f0e7 55%, #e7efe4);
+      background-size: auto, auto, 34px 34px, 34px 34px, auto;
+    }
+
+    body[data-theme="calm"]::before {
+      background:
+        radial-gradient(circle at 90% 85%, rgba(246, 215, 154, 0.28), transparent 28%);
+      mix-blend-mode: normal;
+    }
+
+    body[data-theme="calm"] .hero {
+      background: linear-gradient(145deg, rgba(255,255,255,0.96), rgba(246,250,245,0.88));
+    }
+
+    body[data-theme="calm"] .card {
+      box-shadow: 0 12px 30px rgba(71, 96, 75, 0.08);
+      background: rgba(255,255,255,0.78);
+    }
+
+    body[data-theme="calm"] textarea,
+    body[data-theme="calm"] pre {
+      background: rgba(248, 251, 247, 0.9);
+      color: var(--text);
+    }
+
+    body[data-theme="calm"] textarea {
+      border-color: rgba(59, 93, 64, 0.12);
+    }
+
+    body[data-theme="calm"] pre {
+      color: #2d3b31;
+    }
+
+    body[data-theme="calm"] .badge {
+      background: rgba(47,158,68,0.055);
+      border-color: rgba(47,158,68,0.11);
+      color: #4f6254;
+    }
+
+    body[data-theme="calm"] .theme-switch {
+      background: rgba(255,255,255,0.78);
+      border-color: rgba(59, 93, 64, 0.12);
+      box-shadow: 0 6px 18px rgba(71, 96, 75, 0.08);
+    }
+
+    body[data-theme="calm"] .theme-switch button.active {
+      background: rgba(47,158,68,0.10);
+    }
+
+    body[data-theme="calm"] button {
+      box-shadow: 0 8px 22px rgba(47,158,68,0.14);
+    }
+
+    body[data-theme="calm"] .hero::after {
+      background:
+        radial-gradient(circle, rgba(238, 205, 138, 0.32), transparent 68%);
+    }
+
+    .theme-note {
+      margin-top: 7px;
+    }
+
+    @media (max-width: 640px) {
+      .theme-switch { position: static; margin: 0 0 12px auto; width: fit-content; }
+    }
+
     @media (max-width: 640px) {
       .wrap { width: min(100% - 20px, 980px); padding-top: 20px; }
       .hero, .card { padding: 16px; border-radius: 14px; }
@@ -280,6 +400,10 @@
 <body>
   <div class="wrap">
     <div class="hero">
+      <div class="theme-switch" role="group" aria-label="Theme">
+        <button id="darkThemeBtn" class="active" type="button">Dark</button>
+        <button id="calmThemeBtn" type="button">Calm</button>
+      </div>
       <div class="eyebrow"><span class="dot"></span> StudyFlow AI Lab</div>
       <h1>Qwen3-<span>14B</span> Browser Test</h1>
       <p>Experimental browser-only test for <strong>Qwen3-14B</strong> using WebLLM + WebGPU. The model runs on the visitor's device; there is no AI API key in this page.</p>
@@ -329,8 +453,26 @@
     const reply = document.getElementById("reply");
     const gpuStatus = document.getElementById("gpuStatus");
     const progressBar = document.getElementById("progressBar");
+    const darkThemeBtn = document.getElementById("darkThemeBtn");
+    const calmThemeBtn = document.getElementById("calmThemeBtn");
 
     let engine = null;
+
+    
+    function setTheme(theme) {
+      document.body.dataset.theme = theme;
+      const calm = theme === "calm";
+      darkThemeBtn?.classList.toggle("active", !calm);
+      calmThemeBtn?.classList.toggle("active", calm);
+      localStorage.setItem("studyflow-ai-theme", theme);
+    }
+
+    const savedTheme = localStorage.getItem("studyflow-ai-theme") || "dark";
+    setTheme(savedTheme);
+
+    darkThemeBtn?.addEventListener("click", () => setTheme("dark"));
+    calmThemeBtn?.addEventListener("click", () => setTheme("calm"));
+
 
     gpuStatus.textContent = navigator.gpu ? "WebGPU detected." : "WebGPU is not available in this browser.";
     gpuStatus.className = "status " + (navigator.gpu ? "ok" : "err");

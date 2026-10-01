@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StudyFlow AI Lab — Qwen3-14B</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, sans-serif;
+      background: #0b0b0d;
+      color: #f2f2f2;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px; }
+    .card {
+      background: #141418;
+      border: 1px solid #29292f;
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { color: #a8a8b3; line-height: 1.55; }
+    .status { margin: 12px 0; font-size: 14px; color: #a8a8b3; min-height: 22px; }
+    button {
+      border: 0; border-radius: 9px; padding: 11px 15px;
+      background: #3fb950; color: #081008; font-weight: 700; cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    textarea {
+      width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical;
+      background: #0e0e12; border: 1px solid #303039; color: #fff;
+      border-radius: 9px; padding: 12px; font: inherit;
+    }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    pre {
+      white-space: pre-wrap; margin: 14px 0 0; padding: 14px;
+      background:#0e0e12; border:1px solid #27272e; border-radius:9px;
+      min-height: 80px;
+    }
+    .small { font-size: 12px; color: #7f7f8b; }
+    .ok { color: #6ee7a0; }
+    .err { color: #ff7b72; }
+    code { color:#d2a8ff; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>StudyFlow AI Lab</h1>
+      <p>Experimental browser-only test for <strong>Qwen3-14B</strong> using WebLLM + WebGPU. The model runs on the visitor's device; there is no AI API key in this page.</p>
+      <div class="small">Model weights: Apache 2.0. Temporary external WebGPU library: GPL-3.0 (linked below).</div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button id="loadBtn">Load Qwen3-14B</button>
+        <span id="gpuStatus" class="status"></span>
+      </div>
+      <div id="status" class="status">Not loaded.</div>
+      <div class="small">The first load may download ~8.3 GB of model files and can take a long time. The browser caches the model after a successful download.</div>
+    </div>
+
+    <div class="card">
+      <textarea id="prompt" placeholder="Ask something..."></textarea>
+      <div class="row" style="margin-top:10px;">
+        <button id="sendBtn" disabled>Send</button>
+        <span class="small">Context window is capped at 4096 tokens for this test.</span>
+      </div>
+      <pre id="reply">AI reply will appear here.</pre>
+    </div>
+
+    <div class="card">
+      <div class="small">
+        WebLLM: <a href="https://github.com/mlc-ai/web-llm" target="_blank" rel="noreferrer">mlc-ai/web-llm</a><br>
+        Qwen3-14B model: <a href="https://huggingface.co/mlc-ai/Qwen3-14B-q4f16_1-MLC" target="_blank" rel="noreferrer">mlc-ai/Qwen3-14B-q4f16_1-MLC</a><br>
+        Temporary WebGPU library host: <a href="https://huggingface.co/gwak2837/webllm-model-libs" target="_blank" rel="noreferrer">gwak2837/webllm-model-libs</a>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+
+    const MODEL_ID = "Qwen3-14B-q4f16_1-MLC";
+    const MODEL_URL = "https://huggingface.co/mlc-ai/Qwen3-14B-q4f16_1-MLC";
+    const MODEL_LIB = "https://huggingface.co/gwak2837/webllm-model-libs/resolve/main/Qwen3-14B-q4f16_1-ctx40k_cs2k-webgpu.wasm?download=true";
+
+    const loadBtn = document.getElementById("loadBtn");
+    const sendBtn = document.getElementById("sendBtn");
+    const prompt = document.getElementById("prompt");
+    const status = document.getElementById("status");
+    const reply = document.getElementById("reply");
+    const gpuStatus = document.getElementById("gpuStatus");
+
+    let engine = null;
+
+    gpuStatus.textContent = navigator.gpu ? "WebGPU detected." : "WebGPU is not available in this browser.";
+    gpuStatus.className = "status " + (navigator.gpu ? "ok" : "err");
+
+    const appConfig = {
+      cacheBackend: "cache",
+      model_list: [{
+        model: MODEL_URL,
+        model_id: MODEL_ID,
+        model_lib: MODEL_LIB,
+        overrides: { context_window_size: 4096 }
+      }]
+    };
+
+    loadBtn.addEventListener("click", async () => {
+      if (!navigator.gpu) {
+        status.textContent = "WebGPU is required. Use a browser/device with WebGPU enabled.";
+        status.className = "status err";
+        return;
+      }
+
+      loadBtn.disabled = true;
+      status.className = "status";
+      reply.textContent = "";
+
+      try {
+        engine = await webllm.CreateMLCEngine(MODEL_ID, {
+          appConfig,
+          initProgressCallback: (p) => {
+            status.textContent = p.text || "Loading model…";
+          },
+          logLevel: "INFO",
+        });
+        status.textContent = "Qwen3-14B loaded successfully.";
+        status.className = "status ok";
+        sendBtn.disabled = false;
+      } catch (error) {
+        console.error(error);
+        status.textContent = "Model failed to load: " + (error?.message || String(error));
+        status.className = "status err";
+        loadBtn.disabled = false;
+      }
+    });
+
+    sendBtn.addEventListener("click", async () => {
+      const text = prompt.value.trim();
+      if (!engine || !text) return;
+
+      sendBtn.disabled = true;
+      reply.textContent = "Thinking…";
+
+      try {
+        const chunks = [];
+        const stream = await engine.chat.completions.create({
+          messages: [
+            { role: "system", content: "You are StudyFlow AI, a helpful study assistant. Be concise, clear, and educational." },
+            { role: "user", content: text }
+          ],
+          temperature: 0.6,
+          max_tokens: 512,
+          stream: true
+        });
+
+        for await (const chunk of stream) {
+          const piece = chunk.choices?.[0]?.delta?.content || "";
+          if (piece) {
+            chunks.push(piece);
+            reply.textContent = chunks.join("");
+          }
+        }
+      } catch (error) {
+        console.error(error);
+        reply.textContent = "Generation failed: " + (error?.message || String(error));
+      } finally {
+        sendBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

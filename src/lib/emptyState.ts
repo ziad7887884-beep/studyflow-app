@@ -4,6 +4,7 @@ export function createEmptyState(): StudyFlowState {
   return {
     tasks: [],
     studySessions: [],
+    lectures: [],
     sleepEntries: [],
     habits: [],
     habitLogs: [],

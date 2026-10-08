@@ -1,8 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSettings, Habit, HabitLog, Lecture, PageKey, SleepEntry, StudySession, Subject, StudyFlowState, Task } from '@/types';
 import { loadState, saveState } from '@/lib/storage';
 import { createEmptyState } from '@/lib/emptyState';
 import { todayKey } from '@/lib/datetime';
+import { applyLectureReleases, latestReleaseKey } from '@/lib/lectureSchedule';
 
 interface AppContextValue {
   tasks: Task[];
@@ -39,7 +40,7 @@ interface AppContextValue {
   renameSubject: (id: string, name: string) => void;
   updateSubject: (id: string, updates: Partial<Omit<Subject, 'id'>>) => void;
   deleteSubject: (id: string, reassignTo: string | null) => void;
-  addLecture: (lecture: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey'>) => void;
+  addLecture: (lecture: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey' | 'completedCount' | 'totalReleased'>) => void;
   updateLecture: (id: string, updates: Partial<Omit<Lecture, 'id' | 'createdAt'>>) => void;
   deleteLecture: (id: string) => void;
   completeLecture: (id: string) => void;
@@ -49,60 +50,14 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 const rid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-function pad2(value: number): string {
-  return String(value).padStart(2, '0');
-}
-
-function localDateKey(date: Date): string {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-}
-
-function lectureReleaseKey(lecture: Lecture, reference = new Date()): string | null {
-  const schedule = lecture.releaseSchedule;
-  const start = new Date(`${schedule.startDate}T00:00:00`);
-  if (Number.isNaN(start.getTime())) return null;
-
-  const cursor = new Date(start);
-  cursor.setHours(0, 0, 0, 0);
-  const ref = new Date(reference);
-  ref.setHours(0, 0, 0, 0);
-  if (cursor > ref) return null;
-
-  cursor.setDate(cursor.getDate() + ((schedule.dayOfWeek - cursor.getDay() + 7) % 7));
-  if (cursor > ref) return null;
-
-  const weeks = Math.floor((ref.getTime() - cursor.getTime()) / (7 * 86400000));
-  cursor.setDate(cursor.getDate() + weeks * 7);
-  return `${localDateKey(cursor)}T${schedule.time}`;
-}
-
-function applyLectureReleases(lectures: Lecture[], reference = new Date()): Lecture[] {
-  return lectures.map((lecture) => {
-    const latestRelease = lectureReleaseKey(lecture, reference);
-    if (!latestRelease || latestRelease === lecture.lastReleasedKey) return lecture;
-
-    const latest = new Date(latestRelease.replace(' ', 'T'));
-    const last = lecture.lastReleasedKey ? new Date(lecture.lastReleasedKey.replace(' ', 'T')) : null;
-    const start = last && !Number.isNaN(last.getTime()) ? last : null;
-
-    const scheduleStart = new Date(`${lecture.releaseSchedule.startDate}T${lecture.releaseSchedule.time}`);
-    if (start && !Number.isNaN(scheduleStart.getTime()) && start >= latest) return lecture;
-
-    let additions = 0;
-    let cursor = start ? new Date(start) : new Date(scheduleStart);
-    if (!start && !Number.isNaN(cursor.getTime()) && cursor <= latest) additions = 1;
-
-    if (start) {
-      cursor.setDate(cursor.getDate() + 7);
-      while (cursor <= latest) {
-        additions += 1;
-        cursor.setDate(cursor.getDate() + 7);
-        if (additions > 520) break;
-      }
-    }
-
-    return { ...lecture, backlog: lecture.backlog + additions, lastReleasedKey: latestRelease };
-  });
+function normalizeLectures(lectures: Lecture[] = []): Lecture[] {
+  return lectures.map((lecture) => ({
+    ...lecture,
+    backlog: Math.max(0, Number(lecture.backlog) || 0),
+    completedCount: Math.max(0, Number(lecture.completedCount) || 0),
+    totalReleased: Math.max(0, Number(lecture.totalReleased) || 0),
+    releaseSchedule: { ...lecture.releaseSchedule, lecturesPerRelease: Math.max(1, Number(lecture.releaseSchedule?.lecturesPerRelease) || 1) },
+  }));
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -111,12 +66,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRemote, setIsRemote] = useState(true);
+  const saveQueue = useRef(Promise.resolve());
+
+  const persist = useCallback((state: StudyFlowState) => {
+    setIsSaving(true);
+    saveQueue.current = saveQueue.current.catch(() => undefined).then(() => saveState(state).then(() => undefined)).finally(() => setIsSaving(false));
+  }, []);
 
   useEffect(() => {
     let mounted = true;
     loadState().then(({ state, remote }) => {
       if (mounted) {
-        const normalized = { ...state, lectures: state.lectures ?? [] };
+        const normalized = { ...state, lectures: normalizeLectures(state.lectures) };
         setData(normalized);
         setIsRemote(remote);
         setIsLoading(false);
@@ -133,24 +94,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
     if (!changed) return;
 
-    setData((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, lectures: updatedLectures };
-      setIsSaving(true);
-      saveState(next).finally(() => setIsSaving(false));
-      return next;
-    });
-  }, [data]);
+      setData((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, lectures: updatedLectures };
+        persist(next);
+        return next;
+      });
+  }, [data, persist]);
 
   const commit = useCallback((updater: (prev: StudyFlowState) => StudyFlowState) => {
     setData((prev) => {
       if (!prev) return prev;
       const next = updater(prev);
-      setIsSaving(true);
-      saveState(next).finally(() => setIsSaving(false));
+      persist(next);
       return next;
     });
-  }, []);
+  }, [persist]);
 
   const updateTasks = useCallback((updater: (items: Task[]) => Task[]) => commit((p) => ({ ...p, tasks: updater(p.tasks) })), [commit]);
   const updateSessions = useCallback((updater: (items: StudySession[]) => StudySession[]) => commit((p) => ({ ...p, studySessions: updater(p.studySessions) })), [commit]);
@@ -194,22 +153,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lectures: p.lectures.filter((l) => l.subjectId !== id),
     }));
   }, [commit]);
-  const addLecture = useCallback((lecture: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey'>) => {
-    const seeded = { ...lecture, id: rid(), createdAt: new Date().toISOString(), lastReleasedKey: null };
+  const addLecture = useCallback((lecture: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey' | 'completedCount' | 'totalReleased'>) => {
+    const seeded = { ...lecture, id: rid(), createdAt: new Date().toISOString(), lastReleasedKey: null, completedCount: 0, totalReleased: 0 };
     const normalized = applyLectureReleases([seeded])[0] ?? seeded;
     updateLectures((items) => [normalized, ...items]);
   }, [updateLectures]);
   const updateLecture = useCallback((id: string, updates: Partial<Omit<Lecture, 'id' | 'createdAt'>>) => {
-    updateLectures((items) => items.map((lecture) => lecture.id === id ? { ...lecture, ...updates } : lecture));
+    updateLectures((items) => items.map((lecture) => lecture.id === id ? {
+      ...lecture, ...updates,
+      // A schedule edit starts tracking from the new configuration forward, avoiding retroactive duplicates.
+      lastReleasedKey: updates.releaseSchedule
+        ? latestReleaseKey({ ...lecture, ...updates, releaseSchedule: updates.releaseSchedule })
+        : (updates.lastReleasedKey ?? lecture.lastReleasedKey),
+    } : lecture));
   }, [updateLectures]);
   const deleteLecture = useCallback((id: string) => updateLectures((items) => items.filter((lecture) => lecture.id !== id)), [updateLectures]);
-  const completeLecture = useCallback((id: string) => updateLectures((items) => items.map((lecture) => lecture.id === id ? { ...lecture, backlog: Math.max(0, lecture.backlog - 1) } : lecture)), [updateLectures]);
+  const completeLecture = useCallback((id: string) => updateLectures((items) => items.map((lecture) => lecture.id === id && lecture.backlog > 0 ? { ...lecture, backlog: lecture.backlog - 1, completedCount: lecture.completedCount + 1 } : lecture)), [updateLectures]);
   const clearAllData = useCallback(() => {
     const empty = createEmptyState();
     setData(empty);
-    setIsSaving(true);
-    saveState(empty).finally(() => setIsSaving(false));
-  }, []);
+    persist(empty);
+  }, [persist]);
 
   const value = useMemo<AppContextValue | null>(() => data ? {
     ...data, currentPage, setCurrentPage, isLoading, isSaving, isRemote,

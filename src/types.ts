@@ -50,8 +50,11 @@ export interface Lecture {
     dayOfWeek: number;
     time: string;
     startDate: string;
+    lecturesPerRelease: number;
   };
   backlog: number;
+  completedCount: number;
+  totalReleased: number;
   lastReleasedKey: string | null;
   createdAt: string;
 }

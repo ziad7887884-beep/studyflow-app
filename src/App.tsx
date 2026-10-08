@@ -15,6 +15,7 @@ import {
 import { formatTime12 } from '@/lib/format';
 import { getSubjectColor, getSubjectIcon, getSubjectName, SUBJECT_ICONS, COLOR_KEYS, getSubjectById } from '@/lib/subjects';
 import { getRandomTip } from '@/lib/tips';
+import { nextReleaseKey } from '@/lib/lectureSchedule';
 import {
   cx, SectionLabel, MetricCard, ProgressBar, Ring, EmptyState, MiniBarChart, Heatmap,
   TaskRow, Modal, Toggle, NumberControl, SettingGroup, SettingRow,
@@ -353,13 +354,18 @@ function LecturesPage() {
   const { lectures, subjects, addLecture, updateLecture, deleteLecture, completeLecture } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editLecture, setEditLecture] = useState<Lecture | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Lecture | null>(null);
+  const totalBacklog = lectures.reduce((sum, lecture) => sum + lecture.backlog, 0);
+  const totalReleased = lectures.reduce((sum, lecture) => sum + lecture.totalReleased, 0);
+  const totalCompleted = lectures.reduce((sum, lecture) => sum + lecture.completedCount, 0);
 
   return <PageShell title="Lecture backlog" subtitle="Track what has piled up and let StudyFlow add new releases automatically.">
-    <div className="flex items-center justify-between gap-3 mb-5">
-      <div>
-        <div className="text-sm text-text-secondary">Total backlog</div>
-        <div className="text-3xl font-semibold mt-1">{lectures.reduce((sum, l) => sum + l.backlog, 0)} lectures</div>
-      </div>
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+      <MetricCard icon={BookOpenCheck} label="Total backlog" value={String(totalBacklog)} detail="pending lectures" />
+      <MetricCard icon={Sparkles} label="New lectures" value={String(totalReleased)} detail="released since tracking began" tone="success" />
+      <MetricCard icon={CheckCircle2} label="Completed" value={String(totalCompleted)} detail="lectures finished" tone="success" />
+    </div>
+    <div className="flex items-center justify-end gap-3 mb-5">
       <button onClick={() => { setEditLecture(null); setShowModal(true); }} className="btn-primary"><Plus size={15} /> Add lecture track</button>
     </div>
 
@@ -371,6 +377,7 @@ function LecturesPage() {
           const subject = getSubjectById(subjects, lecture.subjectId);
           const SubjectIcon = subject ? getSubjectIcon(subject.icon) : BookOpenCheck;
           const subjectColor = subject ? getSubjectColor(subject.color) : '#62626d';
+          const nextRelease = nextReleaseKey(lecture);
           return <div key={lecture.id} className="card p-5">
             <div className="flex items-start gap-3">
               <span className="w-10 h-10 rounded-md bg-bg-hover flex items-center justify-center shrink-0"><SubjectIcon size={18} style={{ color: subjectColor }} /></span>
@@ -382,12 +389,13 @@ function LecturesPage() {
                 <div className="mt-4 p-3 bg-bg-base border border-border-subtle rounded-md">
                   <div className="text-xs text-text-secondary">New lecture</div>
                   <div className="text-sm mt-1 font-medium">Every {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][lecture.releaseSchedule.dayOfWeek]} at {formatTime12(lecture.releaseSchedule.time)}</div>
-                  <div className="text-2xs text-text-tertiary mt-1">When a release is due, backlog increases by 1.</div>
+                  <div className="text-2xs text-text-tertiary mt-1">{lecture.releaseSchedule.lecturesPerRelease} lecture{lecture.releaseSchedule.lecturesPerRelease === 1 ? '' : 's'} per release · Next: {nextRelease ? `${nextRelease.slice(0, 10)} at ${formatTime12(nextRelease.slice(11))}` : 'not scheduled'}</div>
                 </div>
+                <div className="flex gap-4 text-2xs text-text-tertiary mt-3"><span>{lecture.completedCount} completed</span><span>Starts {lecture.releaseSchedule.startDate}</span></div>
                 <div className="flex items-center gap-2 mt-4">
                   <button onClick={() => completeLecture(lecture.id)} disabled={lecture.backlog === 0} className="btn-primary flex-1"><Check size={14} /> Complete lecture</button>
                   <button onClick={() => { setEditLecture(lecture); setShowModal(true); }} className="btn-secondary" aria-label="Edit lecture"><Pencil size={14} /></button>
-                  <button onClick={() => deleteLecture(lecture.id)} className="btn-ghost text-danger" aria-label="Delete lecture"><Trash2 size={14} /></button>
+                  <button onClick={() => setDeleteTarget(lecture)} className="btn-ghost text-danger" aria-label="Delete lecture"><Trash2 size={14} /></button>
                 </div>
               </div>
             </div>
@@ -402,16 +410,26 @@ function LecturesPage() {
       setShowModal(false);
       setEditLecture(null);
     }} />}
+    {deleteTarget && <ConfirmModal title={`Delete "${deleteTarget.title}"?`} description="This removes the course and its lecture backlog from StudyFlow. This cannot be undone." confirmLabel="Delete course" onConfirm={() => { deleteLecture(deleteTarget.id); setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} />}
   </PageShell>;
 }
 
-function LectureModal({ onClose, subjects, editLecture, onSubmit }: { onClose: () => void; subjects: Subject[]; editLecture: Lecture | null; onSubmit: (data: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey'>) => void }) {
+function LectureModal({ onClose, subjects, editLecture, onSubmit }: { onClose: () => void; subjects: Subject[]; editLecture: Lecture | null; onSubmit: (data: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey' | 'completedCount' | 'totalReleased'>) => void }) {
   const [title, setTitle] = useState(editLecture?.title ?? '');
   const [subjectId, setSubjectId] = useState(editLecture?.subjectId ?? (subjects[0]?.id ?? ''));
   const [backlog, setBacklog] = useState(editLecture?.backlog ?? 0);
   const [dayOfWeek, setDayOfWeek] = useState(editLecture?.releaseSchedule.dayOfWeek ?? new Date().getDay());
   const [time, setTime] = useState(editLecture?.releaseSchedule.time ?? '20:00');
   const [startDate, setStartDate] = useState(editLecture?.releaseSchedule.startDate ?? todayKey());
+  const [lecturesPerRelease, setLecturesPerRelease] = useState(editLecture?.releaseSchedule.lecturesPerRelease ?? 1);
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!title.trim() || !subjectId || !startDate || !/^\d{2}:\d{2}$/.test(time)) {
+      setError('Enter a course name, subject, valid release time, and schedule start date.');
+      return;
+    }
+    onSubmit({ title: title.trim(), subjectId, backlog: Math.max(0, backlog), releaseSchedule: { frequency: 'weekly', dayOfWeek, time, startDate, lecturesPerRelease: Math.max(1, lecturesPerRelease) } });
+  };
 
   return <Modal onClose={onClose} title={editLecture ? 'Edit lecture track' : 'Add lecture track'} subtitle="Set the current backlog and weekly release schedule." maxWidth="max-w-lg">
     <div className="space-y-4">
@@ -422,9 +440,11 @@ function LectureModal({ onClose, subjects, editLecture, onSubmit }: { onClose: (
         <div><label className="label">Release day</label><select value={dayOfWeek} onChange={(e) => setDayOfWeek(Number(e.target.value))} className="input">{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((day, i) => <option key={day} value={i}>{day}</option>)}</select></div>
         <div><label className="label">Release time</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="input" /></div>
       </div>
+      <div><label className="label">Lectures per release</label><input type="number" min={1} step={1} value={lecturesPerRelease} onChange={(e) => setLecturesPerRelease(Math.max(1, Number(e.target.value)))} className="input" /></div>
       <div><label className="label">Schedule starts</label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" /><p className="text-2xs text-text-tertiary mt-1">Releases before this date are not added to the backlog.</p></div>
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
-    <div className="flex gap-2 justify-end mt-7"><button onClick={onClose} className="btn-ghost">Cancel</button><button disabled={!title.trim() || !subjectId} onClick={() => onSubmit({ title: title.trim(), subjectId, backlog, releaseSchedule: { frequency: 'weekly', dayOfWeek, time, startDate } })} className="btn-primary">{editLecture ? 'Save changes' : 'Add track'}</button></div>
+    <div className="flex gap-2 justify-end mt-7"><button onClick={onClose} className="btn-ghost">Cancel</button><button disabled={!title.trim() || !subjectId} onClick={submit} className="btn-primary">{editLecture ? 'Save changes' : 'Add track'}</button></div>
   </Modal>;
 }
 

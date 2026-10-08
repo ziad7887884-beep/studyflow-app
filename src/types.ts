@@ -10,6 +10,7 @@ export type PageKey =
   | 'sleep'
   | 'goals'
   | 'lectures'
+  | 'planner'
   | 'settings';
 
 export interface Subject {
@@ -31,7 +32,19 @@ export interface Task {
   completed: boolean;
   completedAt: string | null;
   createdAt: string;
+  source?: 'manual' | 'lecture' | 'assignment' | 'reminder';
+  sourceRuleId?: string;
+  sourceOccurrenceId?: string;
+  officialDueDate?: string;
+  officialDueTime?: string;
+  postponedFrom?: { date: string; time: string } | null;
 }
+
+export type RecurrenceKind = 'weekly' | 'daily' | 'intervalDays' | 'intervalWeeks' | 'monthly' | 'manual';
+export interface RecurrenceRule { kind: RecurrenceKind; weekdays: number[]; interval: number; time: string; startDate: string; endDate?: string; timezone: string; }
+export interface AssignmentSchedule { id: string; title: string; subjectId: string | null; courseId?: string | null; recurrence: RecurrenceRule; dueOffsetDays: number; dueTime: string; estimatedMinutes: number; priority: Priority; createTask: boolean; paused: boolean; createdAt: string; }
+export interface ScheduleOccurrence { id: string; ruleId: string; kind: 'lecture' | 'assignment'; scheduledAt: string; processedAt: string; taskId?: string; deletedTask?: boolean; }
+export interface AppNotification { id: string; title: string; body: string; occurrenceId?: string; createdAt: string; read: boolean; }
 
 export interface StudySession {
   id: string;
@@ -50,8 +63,16 @@ export interface Lecture {
     dayOfWeek: number;
     time: string;
     startDate: string;
+    lecturesPerRelease: number;
+    recurrence?: RecurrenceRule;
+    createTask?: boolean;
+    taskTemplate?: string;
+    estimatedMinutes?: number;
+    paused?: boolean;
   };
   backlog: number;
+  completedCount: number;
+  totalReleased: number;
   lastReleasedKey: string | null;
   createdAt: string;
 }
@@ -108,6 +129,9 @@ export interface StudyFlowState {
   habits: Habit[];
   habitLogs: HabitLog[];
   subjects: Subject[];
+  assignmentSchedules: AssignmentSchedule[];
+  occurrences: ScheduleOccurrence[];
+  notifications: AppNotification[];
   settings: AppSettings;
 }
 

@@ -9,24 +9,25 @@ export type PageKey =
   | 'habits'
   | 'sleep'
   | 'goals'
+  | 'lectures'
   | 'settings';
 
 export interface Subject {
   id: string;
   name: string;
-  icon: string; // lucide icon name
-  color: string; // accent color key
+  icon: string;
+  color: string;
 }
 
 export interface Task {
   id: string;
   title: string;
   description: string;
-  subjectId: string | null; // null = "No Subject"
+  subjectId: string | null;
   priority: Priority;
   estimatedMinutes: number;
-  dueDate: string; // YYYY-MM-DD
-  dueTime: string; // HH:MM
+  dueDate: string;
+  dueTime: string;
   completed: boolean;
   completedAt: string | null;
   createdAt: string;
@@ -34,24 +35,39 @@ export interface Task {
 
 export interface StudySession {
   id: string;
-  date: string; // YYYY-MM-DD
-  startTime: string; // HH:MM
+  date: string;
+  startTime: string;
   durationMinutes: number;
   subjectId: string | null;
 }
 
+export interface Lecture {
+  id: string;
+  title: string;
+  subjectId: string;
+  releaseSchedule: {
+    frequency: 'weekly';
+    dayOfWeek: number;
+    time: string;
+    startDate: string;
+  };
+  backlog: number;
+  lastReleasedKey: string | null;
+  createdAt: string;
+}
+
 export interface SleepEntry {
   id: string;
-  date: string; // YYYY-MM-DD (the night of)
-  sleepTime: string; // HH:MM
-  wakeTime: string; // HH:MM
+  date: string;
+  sleepTime: string;
+  wakeTime: string;
   durationMinutes: number;
 }
 
 export interface Habit {
   id: string;
   name: string;
-  icon: string; // lucide icon name
+  icon: string;
   color: string;
   createdAt: string;
 }
@@ -59,7 +75,7 @@ export interface Habit {
 export interface HabitLog {
   id: string;
   habitId: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   completed: boolean;
 }
 
@@ -87,6 +103,7 @@ export interface AppSettings {
 export interface StudyFlowState {
   tasks: Task[];
   studySessions: StudySession[];
+  lectures: Lecture[];
   sleepEntries: SleepEntry[];
   habits: Habit[];
   habitLogs: HabitLog[];

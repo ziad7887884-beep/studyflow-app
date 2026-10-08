@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { AppSettings, Habit, HabitLog, PageKey, SleepEntry, StudySession, Subject, StudyFlowState, Task } from '@/types';
+import type { AppSettings, Habit, HabitLog, Lecture, PageKey, SleepEntry, StudySession, Subject, StudyFlowState, Task } from '@/types';
 import { loadState, saveState } from '@/lib/storage';
 import { createEmptyState } from '@/lib/emptyState';
 import { todayKey } from '@/lib/datetime';
@@ -7,6 +7,7 @@ import { todayKey } from '@/lib/datetime';
 interface AppContextValue {
   tasks: Task[];
   studySessions: StudySession[];
+  lectures: Lecture[];
   sleepEntries: SleepEntry[];
   habits: Habit[];
   habitLogs: HabitLog[];
@@ -19,6 +20,7 @@ interface AppContextValue {
   isRemote: boolean;
   updateTasks: (updater: (items: Task[]) => Task[]) => void;
   updateSessions: (updater: (items: StudySession[]) => StudySession[]) => void;
+  updateLectures: (updater: (items: Lecture[]) => Lecture[]) => void;
   updateSleep: (updater: (items: SleepEntry[]) => SleepEntry[]) => void;
   updateHabits: (updater: (items: Habit[]) => Habit[]) => void;
   updateHabitLogs: (updater: (items: HabitLog[]) => HabitLog[]) => void;
@@ -37,11 +39,71 @@ interface AppContextValue {
   renameSubject: (id: string, name: string) => void;
   updateSubject: (id: string, updates: Partial<Omit<Subject, 'id'>>) => void;
   deleteSubject: (id: string, reassignTo: string | null) => void;
+  addLecture: (lecture: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey'>) => void;
+  updateLecture: (id: string, updates: Partial<Omit<Lecture, 'id' | 'createdAt'>>) => void;
+  deleteLecture: (id: string) => void;
+  completeLecture: (id: string) => void;
   clearAllData: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 const rid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function localDateKey(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function lectureReleaseKey(lecture: Lecture, reference = new Date()): string | null {
+  const schedule = lecture.releaseSchedule;
+  const start = new Date(`${schedule.startDate}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const ref = new Date(reference);
+  ref.setHours(0, 0, 0, 0);
+  if (cursor > ref) return null;
+
+  cursor.setDate(cursor.getDate() + ((schedule.dayOfWeek - cursor.getDay() + 7) % 7));
+  if (cursor > ref) return null;
+
+  const weeks = Math.floor((ref.getTime() - cursor.getTime()) / (7 * 86400000));
+  cursor.setDate(cursor.getDate() + weeks * 7);
+  return `${localDateKey(cursor)}T${schedule.time}`;
+}
+
+function applyLectureReleases(lectures: Lecture[], reference = new Date()): Lecture[] {
+  return lectures.map((lecture) => {
+    const latestRelease = lectureReleaseKey(lecture, reference);
+    if (!latestRelease || latestRelease === lecture.lastReleasedKey) return lecture;
+
+    const latest = new Date(latestRelease.replace(' ', 'T'));
+    const last = lecture.lastReleasedKey ? new Date(lecture.lastReleasedKey.replace(' ', 'T')) : null;
+    const start = last && !Number.isNaN(last.getTime()) ? last : null;
+
+    const scheduleStart = new Date(`${lecture.releaseSchedule.startDate}T${lecture.releaseSchedule.time}`);
+    if (start && !Number.isNaN(scheduleStart.getTime()) && start >= latest) return lecture;
+
+    let additions = 0;
+    let cursor = start ? new Date(start) : new Date(scheduleStart);
+    if (!start && !Number.isNaN(cursor.getTime()) && cursor <= latest) additions = 1;
+
+    if (start) {
+      cursor.setDate(cursor.getDate() + 7);
+      while (cursor <= latest) {
+        additions += 1;
+        cursor.setDate(cursor.getDate() + 7);
+        if (additions > 520) break;
+      }
+    }
+
+    return { ...lecture, backlog: lecture.backlog + additions, lastReleasedKey: latestRelease };
+  });
+}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<StudyFlowState | null>(null);
@@ -54,13 +116,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let mounted = true;
     loadState().then(({ state, remote }) => {
       if (mounted) {
-        setData(state);
+        const normalized = { ...state, lectures: state.lectures ?? [] };
+        setData(normalized);
         setIsRemote(remote);
         setIsLoading(false);
       }
     });
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (!data || data.lectures.length === 0) return;
+    const updatedLectures = applyLectureReleases(data.lectures);
+    const changed = updatedLectures.some((lecture, i) =>
+      lecture.backlog !== data.lectures[i].backlog || lecture.lastReleasedKey !== data.lectures[i].lastReleasedKey
+    );
+    if (!changed) return;
+
+    setData((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, lectures: updatedLectures };
+      setIsSaving(true);
+      saveState(next).finally(() => setIsSaving(false));
+      return next;
+    });
+  }, [data]);
 
   const commit = useCallback((updater: (prev: StudyFlowState) => StudyFlowState) => {
     setData((prev) => {
@@ -74,6 +154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateTasks = useCallback((updater: (items: Task[]) => Task[]) => commit((p) => ({ ...p, tasks: updater(p.tasks) })), [commit]);
   const updateSessions = useCallback((updater: (items: StudySession[]) => StudySession[]) => commit((p) => ({ ...p, studySessions: updater(p.studySessions) })), [commit]);
+  const updateLectures = useCallback((updater: (items: Lecture[]) => Lecture[]) => commit((p) => ({ ...p, lectures: updater(p.lectures) })), [commit]);
   const updateSleep = useCallback((updater: (items: SleepEntry[]) => SleepEntry[]) => commit((p) => ({ ...p, sleepEntries: updater(p.sleepEntries) })), [commit]);
   const updateHabits = useCallback((updater: (items: Habit[]) => Habit[]) => commit((p) => ({ ...p, habits: updater(p.habits) })), [commit]);
   const updateHabitLogs = useCallback((updater: (items: HabitLog[]) => HabitLog[]) => commit((p) => ({ ...p, habitLogs: updater(p.habitLogs) })), [commit]);
@@ -110,8 +191,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       subjects: p.subjects.filter((s) => s.id !== id),
       tasks: p.tasks.map((t) => t.subjectId === id ? { ...t, subjectId: reassignTo } : t),
       studySessions: p.studySessions.map((s) => s.subjectId === id ? { ...s, subjectId: reassignTo } : s),
+      lectures: p.lectures.filter((l) => l.subjectId !== id),
     }));
   }, [commit]);
+  const addLecture = useCallback((lecture: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey'>) => {
+    const seeded = { ...lecture, id: rid(), createdAt: new Date().toISOString(), lastReleasedKey: null };
+    const normalized = applyLectureReleases([seeded])[0] ?? seeded;
+    updateLectures((items) => [normalized, ...items]);
+  }, [updateLectures]);
+  const updateLecture = useCallback((id: string, updates: Partial<Omit<Lecture, 'id' | 'createdAt'>>) => {
+    updateLectures((items) => items.map((lecture) => lecture.id === id ? { ...lecture, ...updates } : lecture));
+  }, [updateLectures]);
+  const deleteLecture = useCallback((id: string) => updateLectures((items) => items.filter((lecture) => lecture.id !== id)), [updateLectures]);
+  const completeLecture = useCallback((id: string) => updateLectures((items) => items.map((lecture) => lecture.id === id ? { ...lecture, backlog: Math.max(0, lecture.backlog - 1) } : lecture)), [updateLectures]);
   const clearAllData = useCallback(() => {
     const empty = createEmptyState();
     setData(empty);
@@ -121,10 +213,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppContextValue | null>(() => data ? {
     ...data, currentPage, setCurrentPage, isLoading, isSaving, isRemote,
-    updateTasks, updateSessions, updateSleep, updateHabits, updateHabitLogs, updateSubjects, updateSettings,
+    updateTasks, updateSessions, updateLectures, updateSleep, updateHabits, updateHabitLogs, updateSubjects, updateSettings,
     toggleTask, addTask, updateTask, deleteTask, addStudySession, addSleepEntry, toggleHabit, addHabit, deleteHabit,
-    addSubject, renameSubject, updateSubject, deleteSubject, clearAllData,
-  } : null, [data, currentPage, isLoading, isSaving, isRemote, updateTasks, updateSessions, updateSleep, updateHabits, updateHabitLogs, updateSubjects, updateSettings, toggleTask, addTask, updateTask, deleteTask, addStudySession, addSleepEntry, toggleHabit, addHabit, addSubject, renameSubject, updateSubject, deleteSubject, clearAllData, deleteHabit]);
+    addSubject, renameSubject, updateSubject, deleteSubject, addLecture, updateLecture, deleteLecture, completeLecture, clearAllData,
+  } : null, [data, currentPage, isLoading, isSaving, isRemote, updateTasks, updateSessions, updateLectures, updateSleep, updateHabits, updateHabitLogs, updateSubjects, updateSettings, toggleTask, addTask, updateTask, deleteTask, addStudySession, addSleepEntry, toggleHabit, addHabit, deleteHabit, addSubject, renameSubject, updateSubject, deleteSubject, addLecture, updateLecture, deleteLecture, completeLecture, clearAllData]);
 
   if (isLoading || !value) return <div className="min-h-screen bg-bg-base flex items-center justify-center"><div className="flex items-center gap-3 text-text-secondary text-sm"><span className="w-2 h-2 bg-success rounded-full animate-pulse" /> Loading your workspace…</div></div>;
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

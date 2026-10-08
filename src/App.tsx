@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   Activity, AlarmClock, BarChart3, Check, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, Flame, Gauge, Goal, History, Home, Menu, Moon, Pause,
+  Clock3, Flame, Gauge, Goal, History, Home, Menu, Moon, Pause, BookOpenCheck,
   Play, Plus, RotateCcw, Settings, SkipForward, SlidersHorizontal, Sparkles, Target,
   Timer, TrendingUp, X, BookOpen, BookPlus, Trash2, Pencil,
 } from 'lucide-react';
-import type { PageKey, Priority, Subject, StudySession, Task } from '@/types';
+import type { Lecture, PageKey, Priority, Subject, StudySession, Task } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { useTimer, updateTimerDurations } from '@/context/TimerContext';
 import {
@@ -29,6 +29,7 @@ const navItems: Array<{ key: PageKey; label: string; icon: typeof Home }> = [
   { key: 'habits', label: 'Habits', icon: Activity },
   { key: 'sleep', label: 'Sleep', icon: Moon },
   { key: 'goals', label: 'Goals', icon: Goal },
+  { key: 'lectures', label: 'Lectures', icon: BookOpenCheck },
 ];
 
 function Sidebar() {
@@ -344,6 +345,86 @@ function TaskModal({ onClose, subjects, editTask, onSubmit }: { onClose: () => v
       <button onClick={onClose} className="btn-ghost">Cancel</button>
       <button disabled={!title.trim()} onClick={() => onSubmit({ title, description, subjectId, priority, estimatedMinutes: minutes, dueDate, dueTime })} className="btn-primary">{editTask ? 'Save changes' : 'Add task'}</button>
     </div>
+  </Modal>;
+}
+
+
+function LecturesPage() {
+  const { lectures, subjects, addLecture, updateLecture, deleteLecture, completeLecture } = useApp();
+  const [showModal, setShowModal] = useState(false);
+  const [editLecture, setEditLecture] = useState<Lecture | null>(null);
+
+  return <PageShell title="Lecture backlog" subtitle="Track what has piled up and let StudyFlow add new releases automatically.">
+    <div className="flex items-center justify-between gap-3 mb-5">
+      <div>
+        <div className="text-sm text-text-secondary">Total backlog</div>
+        <div className="text-3xl font-semibold mt-1">{lectures.reduce((sum, l) => sum + l.backlog, 0)} lectures</div>
+      </div>
+      <button onClick={() => { setEditLecture(null); setShowModal(true); }} className="btn-primary"><Plus size={15} /> Add lecture track</button>
+    </div>
+
+    {lectures.length === 0 ? (
+      <EmptyState icon={BookOpenCheck} title="No lecture tracks yet" description="Add a subject, current backlog, and weekly release time. New lectures will then increase the backlog automatically." action={<button onClick={() => { setEditLecture(null); setShowModal(true); }} className="btn-secondary"><Plus size={14} /> Add lecture track</button>} />
+    ) : (
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {lectures.map((lecture) => {
+          const subject = getSubjectById(subjects, lecture.subjectId);
+          const SubjectIcon = subject ? getSubjectIcon(subject.icon) : BookOpenCheck;
+          const subjectColor = subject ? getSubjectColor(subject.color) : '#62626d';
+          return <div key={lecture.id} className="card p-5">
+            <div className="flex items-start gap-3">
+              <span className="w-10 h-10 rounded-md bg-bg-hover flex items-center justify-center shrink-0"><SubjectIcon size={18} style={{ color: subjectColor }} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div><div className="font-medium text-text-primary">{lecture.title}</div><div className="text-xs text-text-tertiary mt-1">{subject?.name ?? 'No subject'}</div></div>
+                  <div className="text-right"><div className="text-3xl font-semibold leading-none">{lecture.backlog}</div><div className="text-2xs uppercase tracking-widest text-text-tertiary mt-1">backlog</div></div>
+                </div>
+                <div className="mt-4 p-3 bg-bg-base border border-border-subtle rounded-md">
+                  <div className="text-xs text-text-secondary">New lecture</div>
+                  <div className="text-sm mt-1 font-medium">Every {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][lecture.releaseSchedule.dayOfWeek]} at {formatTime12(lecture.releaseSchedule.time)}</div>
+                  <div className="text-2xs text-text-tertiary mt-1">When a release is due, backlog increases by 1.</div>
+                </div>
+                <div className="flex items-center gap-2 mt-4">
+                  <button onClick={() => completeLecture(lecture.id)} disabled={lecture.backlog === 0} className="btn-primary flex-1"><Check size={14} /> Complete lecture</button>
+                  <button onClick={() => { setEditLecture(lecture); setShowModal(true); }} className="btn-secondary" aria-label="Edit lecture"><Pencil size={14} /></button>
+                  <button onClick={() => deleteLecture(lecture.id)} className="btn-ghost text-danger" aria-label="Delete lecture"><Trash2 size={14} /></button>
+                </div>
+              </div>
+            </div>
+          </div>;
+        })}
+      </div>
+    )}
+
+    {showModal && <LectureModal onClose={() => { setShowModal(false); setEditLecture(null); }} subjects={subjects} editLecture={editLecture} onSubmit={(data) => {
+      if (editLecture) updateLecture(editLecture.id, data);
+      else addLecture(data);
+      setShowModal(false);
+      setEditLecture(null);
+    }} />}
+  </PageShell>;
+}
+
+function LectureModal({ onClose, subjects, editLecture, onSubmit }: { onClose: () => void; subjects: Subject[]; editLecture: Lecture | null; onSubmit: (data: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey'>) => void }) {
+  const [title, setTitle] = useState(editLecture?.title ?? '');
+  const [subjectId, setSubjectId] = useState(editLecture?.subjectId ?? (subjects[0]?.id ?? ''));
+  const [backlog, setBacklog] = useState(editLecture?.backlog ?? 0);
+  const [dayOfWeek, setDayOfWeek] = useState(editLecture?.releaseSchedule.dayOfWeek ?? new Date().getDay());
+  const [time, setTime] = useState(editLecture?.releaseSchedule.time ?? '20:00');
+  const [startDate, setStartDate] = useState(editLecture?.releaseSchedule.startDate ?? todayKey());
+
+  return <Modal onClose={onClose} title={editLecture ? 'Edit lecture track' : 'Add lecture track'} subtitle="Set the current backlog and weekly release schedule." maxWidth="max-w-lg">
+    <div className="space-y-4">
+      <div><label className="label">Lecture name</label><input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Physics weekly lecture" className="input" /></div>
+      <div><label className="label">Subject</label><select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="input">{subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>{subjects.length === 0 && <p className="text-xs text-danger mt-1">Create the subject first in Settings.</p>}</div>
+      <div><label className="label">Current backlog</label><input type="number" min={0} value={backlog} onChange={(e) => setBacklog(Math.max(0, Number(e.target.value)))} className="input" /></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="label">Release day</label><select value={dayOfWeek} onChange={(e) => setDayOfWeek(Number(e.target.value))} className="input">{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((day, i) => <option key={day} value={i}>{day}</option>)}</select></div>
+        <div><label className="label">Release time</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="input" /></div>
+      </div>
+      <div><label className="label">Schedule starts</label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" /><p className="text-2xs text-text-tertiary mt-1">Releases before this date are not added to the backlog.</p></div>
+    </div>
+    <div className="flex gap-2 justify-end mt-7"><button onClick={onClose} className="btn-ghost">Cancel</button><button disabled={!title.trim() || !subjectId} onClick={() => onSubmit({ title: title.trim(), subjectId, backlog, releaseSchedule: { frequency: 'weekly', dayOfWeek, time, startDate } })} className="btn-primary">{editLecture ? 'Save changes' : 'Add track'}</button></div>
   </Modal>;
 }
 
@@ -749,6 +830,7 @@ function App() {
       case 'habits': return <Habits />;
       case 'sleep': return <Sleep />;
       case 'goals': return <Goals />;
+      case 'lectures': return <LecturesPage />;
       case 'settings': return <SettingsPage />;
       default: return <Dashboard />;
     }

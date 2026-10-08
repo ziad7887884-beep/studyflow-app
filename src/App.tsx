@@ -3,9 +3,9 @@ import {
   Activity, AlarmClock, BarChart3, Check, CheckCircle2, ChevronLeft, ChevronRight,
   Clock3, Flame, Gauge, Goal, History, Home, Menu, Moon, Pause, BookOpenCheck,
   Play, Plus, RotateCcw, Settings, SkipForward, SlidersHorizontal, Sparkles, Target,
-  Timer, TrendingUp, X, BookOpen, BookPlus, Trash2, Pencil,
+  Timer, TrendingUp, X, BookOpen, BookPlus, Trash2, Pencil, CalendarDays, Bell, BellRing,
 } from 'lucide-react';
-import type { Lecture, PageKey, Priority, Subject, StudySession, Task } from '@/types';
+import type { AssignmentSchedule, Lecture, PageKey, Priority, Subject, StudySession, Task } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { useTimer, updateTimerDurations } from '@/context/TimerContext';
 import {
@@ -31,6 +31,7 @@ const navItems: Array<{ key: PageKey; label: string; icon: typeof Home }> = [
   { key: 'sleep', label: 'Sleep', icon: Moon },
   { key: 'goals', label: 'Goals', icon: Goal },
   { key: 'lectures', label: 'Lectures', icon: BookOpenCheck },
+  { key: 'planner', label: 'Academic Planner', icon: CalendarDays },
 ];
 
 function Sidebar() {
@@ -61,8 +62,8 @@ function Sidebar() {
 }
 
 function Topbar({ title, subtitle }: { title: string; subtitle?: string }) {
-  const { isSaving, isRemote } = useApp();
-  return <header className="h-16 border-b border-border-subtle flex items-center justify-between px-5 sm:px-8 lg:px-10"><div className="pl-10 lg:pl-0"><h1 className="font-semibold text-text-primary tracking-tight">{title}</h1>{subtitle && <p className="text-xs text-text-tertiary mt-0.5">{subtitle}</p>}</div><div className="flex items-center gap-3"><span className="hidden sm:flex items-center gap-1.5 text-2xs text-text-tertiary">{isSaving ? <><span className="w-1.5 h-1.5 bg-warning rounded-full animate-pulse" /> Saving</> : <><span className="w-1.5 h-1.5 bg-success rounded-full" /> {isRemote ? 'Synced' : 'Offline'}</>}</span></div></header>;
+  const { isSaving, isRemote, notifications, markNotificationRead } = useApp(); const [open, setOpen] = useState(false); const unread = notifications.filter((item) => !item.read);
+  return <header className="h-16 border-b border-border-subtle flex items-center justify-between px-5 sm:px-8 lg:px-10"><div className="pl-10 lg:pl-0"><h1 className="font-semibold text-text-primary tracking-tight">{title}</h1>{subtitle && <p className="text-xs text-text-tertiary mt-0.5">{subtitle}</p>}</div><div className="flex items-center gap-3 relative"><button onClick={() => setOpen((value) => !value)} className="relative text-text-tertiary hover:text-text-primary" aria-label="Notifications">{unread.length ? <BellRing size={17} /> : <Bell size={17} />}{unread.length > 0 && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-success" />}</button>{open && <div className="absolute right-0 top-8 z-50 w-80 card-elevated p-3"><div className="text-xs font-medium mb-2">Notifications</div>{notifications.length ? notifications.slice(0, 8).map((item) => <button key={item.id} onClick={() => markNotificationRead(item.id)} className="block text-left w-full p-2 rounded hover:bg-bg-hover"><div className="text-xs text-text-primary">{item.title}</div><div className="text-2xs text-text-tertiary mt-0.5">{item.body}</div></button>) : <p className="text-xs text-text-tertiary p-2">Nothing new yet.</p>}</div>}<span className="hidden sm:flex items-center gap-1.5 text-2xs text-text-tertiary">{isSaving ? <><span className="w-1.5 h-1.5 bg-warning rounded-full animate-pulse" /> Saving</> : <><span className="w-1.5 h-1.5 bg-success rounded-full" /> {isRemote ? 'Synced' : 'Offline'}</>}</span></div></header>;
 }
 
 function PageShell({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
@@ -272,7 +273,7 @@ function Focus() {
 
 // ============ TASKS ============
 function Tasks() {
-  const { tasks, subjects, toggleTask, addTask, updateTask, deleteTask } = useApp();
+  const { tasks, subjects, toggleTask, addTask, updateTask, deleteTask, postponeTask } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [filter, setFilter] = useState<'today' | 'upcoming' | 'completed'>('today');
@@ -308,11 +309,11 @@ function Tasks() {
           const subject = subjectId === 'none' ? null : getSubjectById(subjects, subjectId);
           const SubjectIcon = subject ? getSubjectIcon(subject.icon) : BookOpen;
           const color = subject ? getSubjectColor(subject.color) : '#62626d';
-          return <div key={subjectId} className="card"><div className="px-5 py-3 border-b border-border-subtle flex items-center gap-2"><SubjectIcon size={14} style={{ color }} /><span className="text-xs font-medium text-text-secondary">{subject?.name ?? 'No Subject'}</span><span className="text-2xs text-text-tertiary ml-1">{subjectTasks.length}</span></div><div className="divide-y divide-border-subtle">{subjectTasks.map((task) => <div key={task.id} className="px-5"><TaskRow task={task} onToggle={() => toggleTask(task.id)} onDelete={() => deleteTask(task.id)} onEdit={() => { setEditTask(task); setShowModal(true); }} /></div>)}</div></div>;
+          return <div key={subjectId} className="card"><div className="px-5 py-3 border-b border-border-subtle flex items-center gap-2"><SubjectIcon size={14} style={{ color }} /><span className="text-xs font-medium text-text-secondary">{subject?.name ?? 'No Subject'}</span><span className="text-2xs text-text-tertiary ml-1">{subjectTasks.length}</span></div><div className="divide-y divide-border-subtle">{subjectTasks.map((task) => <div key={task.id} className="px-5"><TaskRow task={task} onToggle={() => toggleTask(task.id)} onDelete={() => deleteTask(task.id)} onEdit={() => { setEditTask(task); setShowModal(true); }} onPostpone={() => postponeTask(task.id, 1)} /></div>)}</div></div>;
         })}
       </div>
     ) : (
-      <div className="card divide-y divide-border-subtle">{visible.map((task) => <div key={task.id} className="px-5"><TaskRow task={task} onToggle={() => toggleTask(task.id)} onDelete={() => deleteTask(task.id)} onEdit={() => { setEditTask(task); setShowModal(true); }} /></div>)}</div>
+      <div className="card divide-y divide-border-subtle">{visible.map((task) => <div key={task.id} className="px-5"><TaskRow task={task} onToggle={() => toggleTask(task.id)} onDelete={() => deleteTask(task.id)} onEdit={() => { setEditTask(task); setShowModal(true); }} onPostpone={() => postponeTask(task.id, 1)} /></div>)}</div>
     )}
 
     {showModal && <TaskModal onClose={() => { setShowModal(false); setEditTask(null); }} subjects={subjects} editTask={editTask} onSubmit={(taskData) => { if (editTask) { updateTask(editTask.id, taskData); } else { addTask(taskData); } setShowModal(false); setEditTask(null); }} />}
@@ -414,11 +415,31 @@ function LecturesPage() {
   </PageShell>;
 }
 
+function AcademicPlanner() {
+  const { lectures, assignmentSchedules, subjects, tasks, addAssignmentSchedule, updateAssignmentSchedule, deleteAssignmentSchedule, setCurrentPage } = useApp();
+  const [showAssignment, setShowAssignment] = useState(false); const today = todayKey();
+  const overdue = tasks.filter((task) => !task.completed && task.dueDate < today).length;
+  const upcoming = lectures.filter((lecture) => !lecture.releaseSchedule.paused).map((lecture) => ({ title: lecture.title, subjectId: lecture.subjectId, at: nextReleaseKey(lecture), type: 'Lecture release' })).filter((item) => item.at).sort((a, b) => a.at!.localeCompare(b.at!)).slice(0, 8);
+  return <PageShell title="Academic Planner" subtitle="Recurring schedules generate independent tasks when StudyFlow is open.">
+    <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mb-6"><MetricCard icon={BookOpenCheck} label="Backlog" value={String(lectures.reduce((sum, item) => sum + item.backlog, 0))} detail="pending lectures" /><MetricCard icon={CalendarDays} label="Upcoming" value={String(upcoming.length)} detail="lecture releases" /><MetricCard icon={CheckCircle2} label="Today" value={String(tasks.filter((task) => !task.completed && task.dueDate === today).length)} detail="scheduled tasks" /><MetricCard icon={AlarmClock} label="Due soon" value={String(tasks.filter((task) => !task.completed && task.officialDueDate && task.officialDueDate <= addDays(new Date(), 2).toISOString().slice(0, 10)).length)} detail="assignments" tone="warning" /><MetricCard icon={Bell} label="Overdue" value={String(overdue)} detail="needs attention" tone="warning" /></div>
+    <div className="flex flex-wrap gap-2 mb-6"><button onClick={() => setCurrentPage('lectures')} className="btn-secondary"><Plus size={14} /> Lecture course</button><button onClick={() => setShowAssignment(true)} className="btn-primary"><Plus size={14} /> Recurring assignment</button><button onClick={() => setCurrentPage('tasks')} className="btn-secondary"><Plus size={14} /> Manual task</button></div>
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4"><div className="card p-5 xl:col-span-2"><SectionLabel>Weekly schedule</SectionLabel><div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((day, index) => <div key={day} className="min-h-28 p-2 rounded-md bg-bg-base border border-border-subtle"><div className="text-2xs text-text-tertiary mb-2">{day}</div>{lectures.filter((lecture) => !lecture.releaseSchedule.paused && (lecture.releaseSchedule.recurrence?.weekdays ?? [lecture.releaseSchedule.dayOfWeek]).includes(index)).map((lecture) => <div key={lecture.id} className="text-2xs p-1.5 mb-1 rounded bg-success-bg text-success truncate">{lecture.title}<br />{lecture.releaseSchedule.recurrence?.time ?? lecture.releaseSchedule.time}</div>)}{assignmentSchedules.filter((rule) => !rule.paused && rule.recurrence.weekdays.includes(index)).map((rule) => <div key={rule.id} className="text-2xs p-1.5 mb-1 rounded bg-warning-bg text-warning truncate">{rule.title}<br />assignment</div>)}</div>)}</div></div><div className="card p-5"><SectionLabel>Upcoming releases</SectionLabel>{upcoming.length ? upcoming.map((item) => <div key={`${item.title}${item.at}`} className="py-2 border-b border-border-subtle last:border-0"><div className="text-sm">{item.title}</div><div className="text-2xs text-text-tertiary mt-1">{item.type} · {item.at?.replace('T', ' ')}</div></div>) : <p className="text-xs text-text-tertiary">No upcoming releases configured.</p>}</div></div>
+    <div className="card mt-4"><div className="p-5 border-b border-border-subtle"><SectionLabel>Assignment schedules</SectionLabel></div>{assignmentSchedules.length ? assignmentSchedules.map((rule) => <div key={rule.id} className="px-5 py-4 border-b border-border-subtle flex justify-between gap-3"><div><div className="text-sm">{rule.title}</div><div className="text-2xs text-text-tertiary mt-1">{rule.recurrence.kind} · {rule.recurrence.time} · due +{rule.dueOffsetDays}d at {rule.dueTime}</div></div><div className="flex gap-2"><button onClick={() => updateAssignmentSchedule(rule.id, { paused: !rule.paused })} className="btn-secondary text-xs">{rule.paused ? 'Resume' : 'Pause'}</button><button onClick={() => deleteAssignmentSchedule(rule.id)} className="btn-ghost text-danger"><Trash2 size={14} /></button></div></div>) : <div className="p-5 text-xs text-text-tertiary">No recurring assignment schedules.</div>}</div>
+    {showAssignment && <AssignmentModal subjects={subjects} onClose={() => setShowAssignment(false)} onSubmit={(rule) => { addAssignmentSchedule(rule); setShowAssignment(false); }} />}
+  </PageShell>;
+}
+
+function AssignmentModal({ subjects, onClose, onSubmit }: { subjects: Subject[]; onClose: () => void; onSubmit: (rule: Omit<AssignmentSchedule, 'id' | 'createdAt'>) => void }) {
+  const [title, setTitle] = useState(''); const [subjectId, setSubjectId] = useState<string | null>(subjects[0]?.id ?? null); const [releaseDate, setReleaseDate] = useState(todayKey()); const [time, setTime] = useState('16:00'); const [dueDays, setDueDays] = useState(3); const [dueTime, setDueTime] = useState('20:00');
+  return <Modal onClose={onClose} title="Recurring assignment" subtitle="A task is generated at each release." maxWidth="max-w-lg"><div className="space-y-4"><div><label className="label">Assignment title</label><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} className="input" /></div><div><label className="label">Subject</label><select value={subjectId ?? ''} onChange={(event) => setSubjectId(event.target.value || null)} className="input"><option value="">No subject</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></div><div className="grid grid-cols-2 gap-3"><div><label className="label">First release</label><input type="date" value={releaseDate} onChange={(event) => setReleaseDate(event.target.value)} className="input" /></div><div><label className="label">Release time</label><input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="input" /></div></div><div className="grid grid-cols-2 gap-3"><div><label className="label">Due after days</label><input type="number" min={0} value={dueDays} onChange={(event) => setDueDays(Math.max(0, Number(event.target.value)))} className="input" /></div><div><label className="label">Official due time</label><input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} className="input" /></div></div></div><div className="flex justify-end gap-2 mt-7"><button onClick={onClose} className="btn-ghost">Cancel</button><button disabled={!title.trim()} onClick={() => onSubmit({ title: title.trim(), subjectId, recurrence: { kind: 'weekly', weekdays: [new Date(`${releaseDate}T00:00`).getDay()], interval: 1, time, startDate: releaseDate, timezone: 'Africa/Cairo' }, dueOffsetDays: dueDays, dueTime, estimatedMinutes: 60, priority: 'medium', createTask: true, paused: false })} className="btn-primary">Create schedule</button></div></Modal>;
+}
+
 function LectureModal({ onClose, subjects, editLecture, onSubmit }: { onClose: () => void; subjects: Subject[]; editLecture: Lecture | null; onSubmit: (data: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey' | 'completedCount' | 'totalReleased'>) => void }) {
   const [title, setTitle] = useState(editLecture?.title ?? '');
   const [subjectId, setSubjectId] = useState(editLecture?.subjectId ?? (subjects[0]?.id ?? ''));
   const [backlog, setBacklog] = useState(editLecture?.backlog ?? 0);
   const [dayOfWeek, setDayOfWeek] = useState(editLecture?.releaseSchedule.dayOfWeek ?? new Date().getDay());
+  const [releaseDays, setReleaseDays] = useState<number[]>(editLecture?.releaseSchedule.recurrence?.weekdays ?? [editLecture?.releaseSchedule.dayOfWeek ?? new Date().getDay()]);
   const [time, setTime] = useState(editLecture?.releaseSchedule.time ?? '20:00');
   const [startDate, setStartDate] = useState(editLecture?.releaseSchedule.startDate ?? todayKey());
   const [lecturesPerRelease, setLecturesPerRelease] = useState(editLecture?.releaseSchedule.lecturesPerRelease ?? 1);
@@ -428,7 +449,7 @@ function LectureModal({ onClose, subjects, editLecture, onSubmit }: { onClose: (
       setError('Enter a course name, subject, valid release time, and schedule start date.');
       return;
     }
-    onSubmit({ title: title.trim(), subjectId, backlog: Math.max(0, backlog), releaseSchedule: { frequency: 'weekly', dayOfWeek, time, startDate, lecturesPerRelease: Math.max(1, lecturesPerRelease) } });
+    onSubmit({ title: title.trim(), subjectId, backlog: Math.max(0, backlog), releaseSchedule: { frequency: 'weekly', dayOfWeek: releaseDays[0] ?? dayOfWeek, time, startDate, lecturesPerRelease: Math.max(1, lecturesPerRelease), recurrence: { kind: 'weekly', weekdays: releaseDays, interval: 1, time, startDate, timezone: 'Africa/Cairo' }, createTask: true, estimatedMinutes: 60 } });
   };
 
   return <Modal onClose={onClose} title={editLecture ? 'Edit lecture track' : 'Add lecture track'} subtitle="Set the current backlog and weekly release schedule." maxWidth="max-w-lg">
@@ -440,6 +461,7 @@ function LectureModal({ onClose, subjects, editLecture, onSubmit }: { onClose: (
         <div><label className="label">Release day</label><select value={dayOfWeek} onChange={(e) => setDayOfWeek(Number(e.target.value))} className="input">{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((day, i) => <option key={day} value={i}>{day}</option>)}</select></div>
         <div><label className="label">Release time</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="input" /></div>
       </div>
+      <div><label className="label">Release days</label><div className="flex flex-wrap gap-2">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((day, index) => <button type="button" key={day} onClick={() => setReleaseDays((days) => days.includes(index) ? (days.length > 1 ? days.filter((value) => value !== index) : days) : [...days, index])} className={cx('px-2.5 py-1.5 rounded text-xs border', releaseDays.includes(index) ? 'bg-success-bg text-success border-success/40' : 'border-border-subtle text-text-tertiary')}>{day}</button>)}</div><p className="text-2xs text-text-tertiary mt-1">Select one or more weekly release days.</p></div>
       <div><label className="label">Lectures per release</label><input type="number" min={1} step={1} value={lecturesPerRelease} onChange={(e) => setLecturesPerRelease(Math.max(1, Number(e.target.value)))} className="input" /></div>
       <div><label className="label">Schedule starts</label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" /><p className="text-2xs text-text-tertiary mt-1">Releases before this date are not added to the backlog.</p></div>
       {error && <p className="text-xs text-danger">{error}</p>}
@@ -851,6 +873,7 @@ function App() {
       case 'sleep': return <Sleep />;
       case 'goals': return <Goals />;
       case 'lectures': return <LecturesPage />;
+      case 'planner': return <AcademicPlanner />;
       case 'settings': return <SettingsPage />;
       default: return <Dashboard />;
     }

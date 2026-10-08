@@ -9,6 +9,9 @@ export function createEmptyState(): StudyFlowState {
     habits: [],
     habitLogs: [],
     subjects: [],
+    assignmentSchedules: [],
+    occurrences: [],
+    notifications: [],
     settings: {
       timer: {
         focusMinutes: 25,

@@ -1,14 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { AppSettings, Habit, HabitLog, Lecture, PageKey, SleepEntry, StudySession, Subject, StudyFlowState, Task } from '@/types';
+import type { AppNotification, AppSettings, AssignmentSchedule, Habit, HabitLog, Lecture, PageKey, SleepEntry, StudySession, Subject, StudyFlowState, Task } from '@/types';
 import { loadState, saveState } from '@/lib/storage';
 import { createEmptyState } from '@/lib/emptyState';
 import { todayKey } from '@/lib/datetime';
-import { applyLectureReleases, latestReleaseKey } from '@/lib/lectureSchedule';
+import { latestReleaseKey } from '@/lib/lectureSchedule';
+import { assignmentDueDate, dueOccurrenceKeys, lectureRule } from '@/lib/planner';
 
 interface AppContextValue {
   tasks: Task[];
   studySessions: StudySession[];
   lectures: Lecture[];
+  assignmentSchedules: AssignmentSchedule[];
+  notifications: AppNotification[];
   sleepEntries: SleepEntry[];
   habits: Habit[];
   habitLogs: HabitLog[];
@@ -31,6 +34,7 @@ interface AppContextValue {
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'completed' | 'completedAt'>) => void;
   updateTask: (id: string, updates: Partial<Omit<Task, 'id' | 'createdAt'>>) => void;
   deleteTask: (id: string) => void;
+  postponeTask: (id: string, days: number, hours?: number) => void;
   addStudySession: (session: Omit<StudySession, 'id'>) => void;
   addSleepEntry: (entry: Omit<SleepEntry, 'id' | 'durationMinutes'>) => void;
   toggleHabit: (habitId: string, date?: string) => void;
@@ -44,6 +48,10 @@ interface AppContextValue {
   updateLecture: (id: string, updates: Partial<Omit<Lecture, 'id' | 'createdAt'>>) => void;
   deleteLecture: (id: string) => void;
   completeLecture: (id: string) => void;
+  addAssignmentSchedule: (rule: Omit<AssignmentSchedule, 'id' | 'createdAt'>) => void;
+  updateAssignmentSchedule: (id: string, changes: Partial<Omit<AssignmentSchedule, 'id' | 'createdAt'>>) => void;
+  deleteAssignmentSchedule: (id: string) => void;
+  markNotificationRead: (id: string) => void;
   clearAllData: () => void;
 }
 
@@ -56,8 +64,40 @@ function normalizeLectures(lectures: Lecture[] = []): Lecture[] {
     backlog: Math.max(0, Number(lecture.backlog) || 0),
     completedCount: Math.max(0, Number(lecture.completedCount) || 0),
     totalReleased: Math.max(0, Number(lecture.totalReleased) || 0),
-    releaseSchedule: { ...lecture.releaseSchedule, lecturesPerRelease: Math.max(1, Number(lecture.releaseSchedule?.lecturesPerRelease) || 1) },
+    releaseSchedule: { ...lecture.releaseSchedule, lecturesPerRelease: Math.max(1, Number(lecture.releaseSchedule?.lecturesPerRelease) || 1), createTask: lecture.releaseSchedule?.createTask ?? true, paused: lecture.releaseSchedule?.paused ?? false },
   }));
+}
+
+function normalizeState(state: StudyFlowState): StudyFlowState {
+  return { ...state, lectures: normalizeLectures(state.lectures), assignmentSchedules: state.assignmentSchedules ?? [], occurrences: state.occurrences ?? [], notifications: state.notifications ?? [], tasks: state.tasks.map((task) => ({ ...task, source: task.source ?? 'manual', postponedFrom: task.postponedFrom ?? null })) };
+}
+
+function processPlanner(state: StudyFlowState): StudyFlowState {
+  const occurrences = [...state.occurrences]; const tasks = [...state.tasks]; const notifications = [...state.notifications]; let lectures = [...state.lectures];
+  const seen = new Set(occurrences.map((item) => item.id));
+  const notify = (title: string, body: string, occurrenceId: string) => notifications.push({ id: rid(), title, body, occurrenceId, createdAt: new Date().toISOString(), read: false });
+  const addTask = (task: Omit<Task, 'id' | 'createdAt' | 'completed' | 'completedAt'>) => { const id = rid(); tasks.unshift({ ...task, id, createdAt: new Date().toISOString(), completed: false, completedAt: null }); return id; };
+  lectures = lectures.map((lecture) => {
+    if (lecture.releaseSchedule.paused) return lecture;
+    let backlog = lecture.backlog; let totalReleased = lecture.totalReleased;
+    for (const scheduledAt of dueOccurrenceKeys(lectureRule(lecture))) {
+      const id = `lecture:${lecture.id}:${scheduledAt}`; if (seen.has(id)) continue;
+      const amount = lecture.releaseSchedule.lecturesPerRelease; let taskId: string | undefined;
+      if (lecture.releaseSchedule.createTask) taskId = addTask({ title: (lecture.releaseSchedule.taskTemplate || `Watch ${lecture.title}`).replace('{course}', lecture.title), description: `Released ${scheduledAt.slice(0, 10)}.`, subjectId: lecture.subjectId, priority: 'medium', estimatedMinutes: lecture.releaseSchedule.estimatedMinutes ?? 60, dueDate: scheduledAt.slice(0, 10), dueTime: scheduledAt.slice(11), source: 'lecture', sourceRuleId: lecture.id, sourceOccurrenceId: id });
+      occurrences.push({ id, ruleId: lecture.id, kind: 'lecture', scheduledAt, processedAt: new Date().toISOString(), taskId }); seen.add(id); backlog += amount; totalReleased += amount; notify('New lecture available', `${lecture.title} is ready to study.`, id);
+    }
+    return { ...lecture, backlog, totalReleased };
+  });
+  for (const rule of state.assignmentSchedules) {
+    if (rule.paused) continue;
+    for (const scheduledAt of dueOccurrenceKeys(rule.recurrence)) {
+      const id = `assignment:${rule.id}:${scheduledAt}`; if (seen.has(id)) continue;
+      const due = assignmentDueDate(rule, scheduledAt); let taskId: string | undefined;
+      if (rule.createTask) taskId = addTask({ title: rule.title, description: `Assignment released ${scheduledAt.slice(0, 10)}. Official deadline: ${due.date} ${due.time}.`, subjectId: rule.subjectId, priority: rule.priority, estimatedMinutes: rule.estimatedMinutes, dueDate: due.date, dueTime: due.time, officialDueDate: due.date, officialDueTime: due.time, source: 'assignment', sourceRuleId: rule.id, sourceOccurrenceId: id });
+      occurrences.push({ id, ruleId: rule.id, kind: 'assignment', scheduledAt, processedAt: new Date().toISOString(), taskId }); seen.add(id); notify('New assignment added', `${rule.title} is due ${due.date}.`, id);
+    }
+  }
+  return { ...state, lectures, tasks, occurrences, notifications };
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -77,7 +117,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let mounted = true;
     loadState().then(({ state, remote }) => {
       if (mounted) {
-        const normalized = { ...state, lectures: normalizeLectures(state.lectures) };
+        const normalized = normalizeState(state);
         setData(normalized);
         setIsRemote(remote);
         setIsLoading(false);
@@ -87,16 +127,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!data || data.lectures.length === 0) return;
-    const updatedLectures = applyLectureReleases(data.lectures);
-    const changed = updatedLectures.some((lecture, i) =>
-      lecture.backlog !== data.lectures[i].backlog || lecture.lastReleasedKey !== data.lectures[i].lastReleasedKey
-    );
-    if (!changed) return;
-
-      setData((prev) => {
+    if (!data) return;
+    const updated = processPlanner(data);
+    if (updated === data || (updated.occurrences.length === data.occurrences.length && updated.tasks.length === data.tasks.length)) return;
+    setData((prev) => {
         if (!prev) return prev;
-        const next = { ...prev, lectures: updatedLectures };
+        const next = processPlanner(prev);
         persist(next);
         return next;
       });
@@ -120,10 +156,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateSubjects = useCallback((updater: (items: Subject[]) => Subject[]) => commit((p) => ({ ...p, subjects: updater(p.subjects) })), [commit]);
   const updateSettings = useCallback((updater: (settings: AppSettings) => AppSettings) => commit((p) => ({ ...p, settings: updater(p.settings) })), [commit]);
 
-  const toggleTask = useCallback((taskId: string) => updateTasks((items) => items.map((task) => task.id === taskId ? { ...task, completed: !task.completed, completedAt: !task.completed ? new Date().toISOString() : null } : task)), [updateTasks]);
+  const toggleTask = useCallback((taskId: string) => commit((p) => {
+    const task = p.tasks.find((item) => item.id === taskId); if (!task) return p; const completes = !task.completed;
+    return { ...p, tasks: p.tasks.map((item) => item.id === taskId ? { ...item, completed: completes, completedAt: completes ? new Date().toISOString() : null } : item), lectures: completes && task.source === 'lecture' && task.sourceRuleId ? p.lectures.map((lecture) => lecture.id === task.sourceRuleId && lecture.backlog > 0 ? { ...lecture, backlog: lecture.backlog - 1, completedCount: lecture.completedCount + 1 } : lecture) : p.lectures };
+  }), [commit]);
   const addTask = useCallback((task: Omit<Task, 'id' | 'createdAt' | 'completed' | 'completedAt'>) => updateTasks((items) => [{ ...task, id: rid(), createdAt: new Date().toISOString(), completed: false, completedAt: null }, ...items]), [updateTasks]);
   const updateTask = useCallback((taskId: string, updates: Partial<Omit<Task, 'id' | 'createdAt'>>) => updateTasks((items) => items.map((task) => task.id === taskId ? { ...task, ...updates } : task)), [updateTasks]);
   const deleteTask = useCallback((taskId: string) => updateTasks((items) => items.filter((task) => task.id !== taskId)), [updateTasks]);
+  const postponeTask = useCallback((taskId: string, days: number, hours = 0) => updateTasks((items) => items.map((task) => { if (task.id !== taskId) return task; const date = new Date(`${task.dueDate}T${task.dueTime || '09:00'}`); date.setDate(date.getDate() + days); date.setHours(date.getHours() + hours); return { ...task, dueDate: date.toISOString().slice(0, 10), dueTime: date.toTimeString().slice(0, 5), postponedFrom: task.postponedFrom ?? { date: task.dueDate, time: task.dueTime } }; })), [updateTasks]);
   const addStudySession = useCallback((session: Omit<StudySession, 'id'>) => updateSessions((items) => [...items, { ...session, id: rid() }]), [updateSessions]);
   const addSleepEntry = useCallback((entry: Omit<SleepEntry, 'id' | 'durationMinutes'>) => {
     const [sh, sm] = entry.sleepTime.split(':').map(Number);
@@ -155,8 +195,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [commit]);
   const addLecture = useCallback((lecture: Omit<Lecture, 'id' | 'createdAt' | 'lastReleasedKey' | 'completedCount' | 'totalReleased'>) => {
     const seeded = { ...lecture, id: rid(), createdAt: new Date().toISOString(), lastReleasedKey: null, completedCount: 0, totalReleased: 0 };
-    const normalized = applyLectureReleases([seeded])[0] ?? seeded;
-    updateLectures((items) => [normalized, ...items]);
+    updateLectures((items) => [seeded, ...items]);
   }, [updateLectures]);
   const updateLecture = useCallback((id: string, updates: Partial<Omit<Lecture, 'id' | 'createdAt'>>) => {
     updateLectures((items) => items.map((lecture) => lecture.id === id ? {
@@ -169,6 +208,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [updateLectures]);
   const deleteLecture = useCallback((id: string) => updateLectures((items) => items.filter((lecture) => lecture.id !== id)), [updateLectures]);
   const completeLecture = useCallback((id: string) => updateLectures((items) => items.map((lecture) => lecture.id === id && lecture.backlog > 0 ? { ...lecture, backlog: lecture.backlog - 1, completedCount: lecture.completedCount + 1 } : lecture)), [updateLectures]);
+  const addAssignmentSchedule = useCallback((rule: Omit<AssignmentSchedule, 'id' | 'createdAt'>) => commit((p) => ({ ...p, assignmentSchedules: [...p.assignmentSchedules, { ...rule, id: rid(), createdAt: new Date().toISOString() }] })), [commit]);
+  const updateAssignmentSchedule = useCallback((id: string, changes: Partial<Omit<AssignmentSchedule, 'id' | 'createdAt'>>) => commit((p) => ({ ...p, assignmentSchedules: p.assignmentSchedules.map((rule) => rule.id === id ? { ...rule, ...changes } : rule) })), [commit]);
+  const deleteAssignmentSchedule = useCallback((id: string) => commit((p) => ({ ...p, assignmentSchedules: p.assignmentSchedules.filter((rule) => rule.id !== id) })), [commit]);
+  const markNotificationRead = useCallback((id: string) => commit((p) => ({ ...p, notifications: p.notifications.map((item) => item.id === id ? { ...item, read: true } : item) })), [commit]);
   const clearAllData = useCallback(() => {
     const empty = createEmptyState();
     setData(empty);
@@ -178,9 +221,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppContextValue | null>(() => data ? {
     ...data, currentPage, setCurrentPage, isLoading, isSaving, isRemote,
     updateTasks, updateSessions, updateLectures, updateSleep, updateHabits, updateHabitLogs, updateSubjects, updateSettings,
-    toggleTask, addTask, updateTask, deleteTask, addStudySession, addSleepEntry, toggleHabit, addHabit, deleteHabit,
-    addSubject, renameSubject, updateSubject, deleteSubject, addLecture, updateLecture, deleteLecture, completeLecture, clearAllData,
-  } : null, [data, currentPage, isLoading, isSaving, isRemote, updateTasks, updateSessions, updateLectures, updateSleep, updateHabits, updateHabitLogs, updateSubjects, updateSettings, toggleTask, addTask, updateTask, deleteTask, addStudySession, addSleepEntry, toggleHabit, addHabit, deleteHabit, addSubject, renameSubject, updateSubject, deleteSubject, addLecture, updateLecture, deleteLecture, completeLecture, clearAllData]);
+    toggleTask, addTask, updateTask, deleteTask, postponeTask, addStudySession, addSleepEntry, toggleHabit, addHabit, deleteHabit,
+    addSubject, renameSubject, updateSubject, deleteSubject, addLecture, updateLecture, deleteLecture, completeLecture, addAssignmentSchedule, updateAssignmentSchedule, deleteAssignmentSchedule, markNotificationRead, clearAllData,
+  } : null, [data, currentPage, isLoading, isSaving, isRemote, updateTasks, updateSessions, updateLectures, updateSleep, updateHabits, updateHabitLogs, updateSubjects, updateSettings, toggleTask, addTask, updateTask, deleteTask, postponeTask, addStudySession, addSleepEntry, toggleHabit, addHabit, deleteHabit, addSubject, renameSubject, updateSubject, deleteSubject, addLecture, updateLecture, deleteLecture, completeLecture, addAssignmentSchedule, updateAssignmentSchedule, deleteAssignmentSchedule, markNotificationRead, clearAllData]);
 
   if (isLoading || !value) return <div className="min-h-screen bg-bg-base flex items-center justify-center"><div className="flex items-center gap-3 text-text-secondary text-sm"><span className="w-2 h-2 bg-success rounded-full animate-pulse" /> Loading your workspace…</div></div>;
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
